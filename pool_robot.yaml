@@ -1,0 +1,285 @@
+esphome:
+  name: pool-robot
+  friendly_name: Pool Robot
+  area: Pool
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: boot_sequence
+      - script.execute: stop_after_a_while
+
+esp8266:
+  board: esp01_1m
+  restore_from_flash: true
+
+logger:
+
+api:
+  encryption:
+    key: !secret poolbot_api_key
+
+ota:
+  - platform: esphome
+    password: !secret poolbot_ota_password
+
+captive_portal:
+
+# wifi:
+#   ssid: !secret wifi_ssid
+#   password: !secret wifi_password
+#   ap:
+#     ssid: "Pool-Robot Fallback Hotspot"
+#     password: "super-secret-password"
+
+# ───────────────────────────────────────────────
+# Wireguard
+# ───────────────────────────────────────────────
+wifi:
+  ssid: !secret remote_ssid
+  password: !secret remote_password
+  use_address: !secret poolbot_wg_address
+  ap:
+    ssid: "Pool-Robot Fallback Hotspot"
+    password: "super-secret-password"
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Paris
+    servers:
+     - 0.pool.ntp.org
+     - 1.pool.ntp.org
+     - 2.pool.ntp.org
+
+wireguard:
+  peer_endpoint: !secret wg_endpoint
+  peer_port: !secret wg_port
+  peer_public_key: !secret wg_publickey
+  address: !secret poolbot_wg_address
+  private_key: !secret poolbot_wg_privatekey
+  peer_preshared_key: !secret poolbot_wg_presharedkey
+  netmask: 255.255.0.0
+  peer_allowed_ips:
+    - 0.0.0.0/0
+  #  - 192.168.27.64/27
+  #  - 192.168.0.0/24
+  peer_persistent_keepalive: 25s
+
+# ───────────────────────────────────────────────
+# Define motor control pins
+# GPIO pins that control the H-bridge or relays
+# ───────────────────────────────────────────────
+switch:
+  - platform: gpio
+    pin: GPIO4 # D2
+    id: fan_a
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    pin: GPIO5 # D1
+    id: fan_b
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    pin: GPIO12 # D6
+    id: thread_a
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    pin: GPIO13 # D7
+    id: thread_b
+    restore_mode: ALWAYS_OFF
+
+# ───────────────────────────────────────────────
+# Define globals to track thread state and timers
+# ───────────────────────────────────────────────
+globals:
+  - id: thread_direction
+    type: int
+    restore_value: no
+    initial_value: '1'  # 1 = forward, -1 = backward
+  - id: done
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+
+# ───────────────────────────────────────────────
+# Define scripts for thread direction changes
+# ───────────────────────────────────────────────
+script:
+  - id: robot_stop
+    then:
+      - logger.log: "robot STOP"
+      - switch.turn_off: thread_a
+      - switch.turn_off: thread_b
+      - switch.turn_off: fan_a
+      - switch.turn_off: fan_b
+
+  - id: thread_forward
+    then:
+      - logger.log: "thread set FORWARD"
+      - switch.turn_off: thread_b
+      - delay: 2s
+      - switch.turn_on: thread_a
+      - globals.set:
+          id: thread_direction
+          value: '1'
+
+  - id: thread_backward
+    then:
+      - logger.log: "thread set BACKWARD"
+      - switch.turn_off: thread_a
+      - delay: 2s
+      - switch.turn_on: thread_b
+      - globals.set:
+          id: thread_direction
+          value: '-1'
+
+  - id: toggle_direction
+    then:
+      - if:
+          condition:
+            lambda: 'return id(thread_direction) == 1;'
+          then:
+            - script.execute: thread_backward
+          else:
+            - script.execute: thread_forward
+
+# ───────────────────────────────────────────────
+# Define timers for climbing / flat durations
+# ───────────────────────────────────────────────
+  - id: climbing_timer
+    mode: restart
+    then:
+      - delay: !lambda 'return id(climbing_duration).state * 60.0 * 1000.0;'
+      - logger.log: "Climbing duration reached — reversing!"
+      - script.execute: toggle_direction
+
+  - id: flat_timer
+    mode: restart
+    then:
+      - delay: !lambda 'return id(flat_duration).state * 60.0 * 1000.0;'
+      - logger.log: "Flat duration reached — reversing!"
+      - script.execute: toggle_direction
+
+  - id: stop_after_a_while
+    then:
+      - delay: !lambda 'return id(run_duration).state * 3600.0 * 1000.0;'
+      - logger.log: "Run duration reached — stopping robot."
+      - script.execute: robot_stop
+      - globals.set:
+          id: done
+          value: 'true'
+
+# ───────────────────────────────────────────────
+# Define boot sequence
+# ───────────────────────────────────────────────
+  - id: boot_sequence
+    then:
+      - delay: 2s
+      - logger.log: "starting boot sequence"
+      - script.execute: thread_forward
+      - delay: 5s
+      - script.execute: toggle_direction
+      - delay: 5s
+      - switch.turn_on: fan_a
+      - delay: 5s
+      - script.execute: robot_stop
+      - delay: 5s
+      - switch.turn_on: fan_a
+      - globals.set:
+          id: done
+          value: 'false'
+      - logger.log: "finished boot sequence"
+
+# ───────────────────────────────────────────────
+# Define the angle sensor (SW-520D)
+# ───────────────────────────────────────────────
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO14 # D5
+      mode: INPUT
+    id: climbing_sensor
+    name: "Climbing Sensor"
+    filters:
+      - delayed_on: 500ms      # only consider "pressed" if high for 0.5s
+      - delayed_off: 500ms     # only consider "released" if low for 0.5s
+    on_press:
+      - if:
+          condition:
+            lambda: 'return !id(done);'  # don't run if we've finished the program
+          then:
+            - logger.log: "Sensor = 1 (climbing)"
+            - script.stop: flat_timer
+            - script.execute: climbing_timer
+    on_release:
+      - if:
+          condition:
+            lambda: 'return !id(done);'
+          then:
+            - logger.log: "Sensor = 0 (flat)"
+            - script.stop: climbing_timer
+            - script.execute: flat_timer
+    icon: mdi:spirit-level
+
+# ───────────────────────────────────────────────
+# Editable timers
+# ───────────────────────────────────────────────
+number:
+  - platform: template
+    name: "Climbing Duration"
+    id: climbing_duration
+    min_value: 0.5
+    max_value: 10
+    step: 0.1
+    unit_of_measurement: "min"
+    initial_value: 2
+    optimistic: true
+    restore_value: true
+    icon: mdi:pan-vertical
+
+  - platform: template
+    name: "Flat Duration"
+    id: flat_duration
+    min_value: 1
+    max_value: 20
+    step: 0.5
+    unit_of_measurement: "min"
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    icon: mdi:pan-horizontal
+
+  - platform: template
+    name: "Run Duration"
+    id: run_duration
+    min_value: 0.1
+    max_value: 8
+    step: 0.1
+    unit_of_measurement: "h"
+    initial_value: 1
+    optimistic: true
+    restore_value: true
+    icon: mdi:timer
+
+# ───────────────────────────────────────────────
+# Manual controls
+# ───────────────────────────────────────────────
+button:
+  - platform: template
+    name: Reverse Threads
+    id: reverse_threads
+    icon: mdi:swap-horizontal
+    on_press: 
+      then:
+        - script.execute: toggle_direction
+
+  - platform: template
+    name: Turn Off
+    id: turn_robot_off
+    icon: mdi:robot-off
+    on_press: 
+      then:
+        - script.execute: robot_stop
+        

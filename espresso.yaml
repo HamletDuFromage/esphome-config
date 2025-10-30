@@ -1,0 +1,290 @@
+# https://www.aliexpress.com/item/1005006582898369.html
+esphome:
+  name: espresso
+  friendly_name: ESPresso
+  area: Kitchen
+  on_boot:
+    priority: 250
+    then:
+      - script.execute:
+          id: set_tune
+          tune_name: !lambda 'return std::string(id(tune_selector).state);'
+
+esp8266:
+  board: esp01_1m
+  restore_from_flash: true
+
+preferences:
+  flash_write_interval: 10s
+
+logger:
+  level: WARN
+
+api:
+  encryption:
+    key: !secret espresso_api_key
+
+ota:
+  - platform: esphome
+    password: !secret espresso_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+captive_portal:
+
+output:
+  - platform: gpio # initialize EN to LOW
+    id: cd74hc4067_en
+    pin: 2 #D4
+
+  - platform: esp8266_pwm # https://esphome.io/components/rtttl.html
+    pin: 15 #D8
+    id: rtttl_out
+
+rtttl: # Buzzer
+  id: buzzer
+  output: rtttl_out
+
+cd74hc4067: # Multiplexer, NTC and barometer
+ - id: cd74hc4067_1
+   pin_s0: 0 #D3
+   pin_s1: 4 #D2
+   pin_s2: 5 #D1
+   pin_s3: 16 #D0
+
+sensor: 
+  - platform: adc # https://esphome.io/components/sensor/cd74hc4067.html
+    id: adc_sensor
+    pin: A0
+
+  - platform: cd74hc4067
+    id: pressure
+    number: 0
+    sensor: adc_sensor
+    update_interval: 1s
+    name: "Pressure"
+    unit_of_measurement: "bar"
+    device_class: "pressure"
+    state_class: "measurement"
+    icon: "mdi:kettle-steam"
+    accuracy_decimals: 2
+    # esp reading (V),barometer (bar)
+    # 0.34,0
+    # 1.05,0.5
+    # 1.66,1
+    # 1.74,1.2
+    filters:
+      - multiply: 3.3
+      - lambda: |-
+          float res = 0.822*x - 0.309; 
+          return res >= 0 ? res : 0;
+    on_value_range:
+    - above: !lambda "return id(target_pressure).state;"
+      then:
+        #- lambda: "id(shots_pulled) += 1;"
+        - switch.turn_off: pressure_relay
+    - below: !lambda "return id(target_pressure).state;"
+      then:
+        - switch.turn_on: pressure_relay
+ 
+  - platform: cd74hc4067
+    id: source_sensor
+    number: 1
+    sensor: adc_sensor
+    update_interval: never
+    # update_interval: 1s
+    filters:
+       - multiply: 3.3 # https://arduino.stackexchange.com/questions/71949/voltage-divider-and-nodemcu-inputs/71952#71952
+  - platform: resistance
+    id: resistance_sensor
+    sensor: source_sensor
+    configuration: UPSTREAM
+    resistor: 1kOhm # ntc"s resistance at working temp 
+    reference_voltage:  3.3V
+
+  - platform: ntc
+    id: temperature
+    sensor: resistance_sensor
+    calibration:
+      b_constant: 3950 #3950 specs
+      reference_temperature: 85°C # https://www.aliexpress.us/item/3256801683072456.html
+      reference_resistance: 1kOhm
+      # - 10.8kOhm -> 23°C
+      # - 19.3kOhm -> 10°C
+      # - 2.63kOhm -> 67°C
+    name: "Temperature"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    icon: "mdi:thermometer"
+    accuracy_decimals: 1
+    # esp reading (C),voltmeter (C)
+    # 90.4,99
+    # 77.8,85
+    # 73,79
+    # 70,76
+    # 68,72
+    # 60.3,64
+    filters: 
+      - lambda: "return 1.17*x - 6.79;"
+    on_value_range:
+      - above: !lambda "return id(target_temperature).state;"
+        then:
+          - lambda: "id(shots_pulled) += 1;"
+          - script.execute: play_tune
+      - below: !lambda "return id(target_temperature).state;"
+        then:
+          - script.execute: stop_tune
+
+  - platform: template
+    name: "Shots Pulled"
+    id: shots_pulled_sensor
+    lambda: "return id(shots_pulled);"
+    update_interval: 10s
+    icon: "mdi:coffee-maker-check"
+    unit_of_measurement: "shots"
+    accuracy_decimals: 0
+
+  - platform: uptime
+    type: seconds
+    id: uptime_sensor
+    name: "Uptime"
+    update_interval: 30s
+    icon: "mdi:timer-sand"
+
+switch:
+  - platform: gpio # Self-heating fix
+    pin: 13 # D7
+    id: ntc_vcc
+
+  - platform: gpio
+    pin: 12 # D5 should set it to a proper pin
+    id: pressure_relay
+
+interval: # https://esphome.io/components/sensor/ntc.html#self-heating
+  - interval: 1s
+    then:
+      - switch.turn_on: ntc_vcc
+      - component.update: source_sensor
+      - switch.turn_off: ntc_vcc
+
+script:
+  - id: play_tune
+    then:
+      - globals.set:
+          id: should_play_tune
+          value: 'true'  
+      - while:
+          condition:
+            - lambda: 'return id(should_play_tune);'
+          then:
+            - wait_until:
+                - not:
+                    rtttl.is_playing
+            - rtttl.play:
+                rtttl: !lambda 'return id(rtttl_tune);'
+            #- rtttl.play: 'scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b'
+  - id: stop_tune
+    then:
+      - globals.set:
+          id: should_play_tune
+          value: 'false'
+
+  - id: set_tune
+    parameters:
+      tune_name: string
+    then:
+      - lambda: |-
+          if (tune_name == "Scale Up") id(rtttl_tune) = id(tune_scale_up);
+          else if (tune_name == "Axel F") id(rtttl_tune) = id(tune_axel_f);
+          else if (tune_name == "Polka") id(rtttl_tune) = id(tune_polka);
+          else if (tune_name == "Star Trek") id(rtttl_tune) = id(tune_star_trek);
+          else if (tune_name == "The A Team") id(rtttl_tune) = id(tune_a_team);
+          else if (tune_name == "Verve") id(rtttl_tune) = id(tune_verve);
+
+globals:
+  - id: shots_pulled
+    type: int
+    restore_value: true
+
+  - id: should_play_tune
+    type: bool
+    initial_value: 'false'
+
+  - id: rtttl_tune
+    type: std::string
+    initial_value: '"scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"'
+
+  # https://1j01.github.io/rtttl.js
+  - id: tune_scale_up
+    type: std::string
+    initial_value: '"scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"'
+
+  - id: tune_axel_f
+    type: std::string
+    initial_value: '"axel_f:d=8,o=5,b=125:16g,16g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g,4p,16f6,d6,c6,a#,4g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g"'
+
+  - id: tune_polka
+    type: std::string
+    initial_value: '"polka:d=16,o=5,b=140:d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,f,e,d,c#,d,a4,b4,c#,d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,d,4p,2c#,8d,8a4,8d"'
+
+  - id: tune_star_trek
+    type: std::string
+    initial_value: '"star_trek:d=16,o=5,b=63:8f.,a#,4d#6.,8d6,a#.,g.,c6.,4f6"'
+
+  - id: tune_a_team
+    type: std::string
+    initial_value: '"the_a_team:d=8,o=5,b=132:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#6.,16c6,16a#,g#.,2a#."'
+
+  - id: tune_verve
+    type: std::string
+    initial_value: '"verve:d=8,o=5,b=80:b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e,p,b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e"'
+
+
+
+number:
+  - platform: template # Home assistant widget to set target pressure 
+    id: target_pressure
+    name: Target Pressure
+    min_value: 0.7
+    max_value: 1.3
+    initial_value: 0.95
+    step: 0.01
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "bar"
+    icon: "mdi:kettle-alert"
+
+  - platform: template # Home assistant widget to set target temperature 
+    id: target_temperature
+    name: Target Temperature
+    min_value: 70
+    max_value: 100
+    initial_value: 85
+    step: 1
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "°C"
+    icon: "mdi:thermometer-alert"
+
+select:
+  - platform: template
+    name: "Tune Selector"
+    id: tune_selector
+    restore_value: true
+    optimistic: true
+    options:
+      - "Scale Up"
+      - "Axel F"
+      - "Polka"
+      - "Star Trek"
+      - "The A Team"
+      - "Verve"
+    initial_option: "Scale Up"
+    set_action:
+      - script.execute:
+          id: set_tune
+          tune_name: !lambda 'return std::string(x);'
+    icon: mdi:music-note
