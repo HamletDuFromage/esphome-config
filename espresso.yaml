@@ -197,6 +197,17 @@ script:
       tune_name: string
     then:
       - lambda: |-
+          if (tune_name == "Random") {
+            std::vector<std::string> tune_names = {
+              "Scale Up",
+              "Axel F",
+              "Polka",
+              "Star Trek",
+              "The A Team",
+              "Verve"
+            };
+            tune_name = tune_names[rand() % tune_names.size()];
+          }
           if (tune_name == "Scale Up") id(rtttl_tune) = id(tune_scale_up);
           else if (tune_name == "Axel F") id(rtttl_tune) = id(tune_axel_f);
           else if (tune_name == "Polka") id(rtttl_tune) = id(tune_polka);
@@ -282,6 +293,7 @@ select:
       - "Star Trek"
       - "The A Team"
       - "Verve"
+      - "Random"
     initial_option: "Scale Up"
     set_action:
       - script.execute:
