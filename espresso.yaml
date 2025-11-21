@@ -6,9 +6,16 @@ esphome:
   on_boot:
     priority: 250
     then:
+      - lambda: 'srand((unsigned int)micros() ^ analogRead(A0));'
       - script.execute:
           id: set_tune
-          tune_name: !lambda 'return std::string(id(tune_selector).state);'
+          tune_name: !lambda 'return std::string(id(tune_selector).current_option());'
+      - delay: 2s
+      - if:
+          condition:
+            lambda: 'return id(temperature).state > id(target_temperature).state;'
+          then:
+            - script.execute: play_tune
 
 esp8266:
   board: esp01_1m
