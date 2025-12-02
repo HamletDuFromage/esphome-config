@@ -221,6 +221,9 @@ script:
           else if (tune_name == "Star Trek") id(rtttl_tune) = id(tune_star_trek);
           else if (tune_name == "The A Team") id(rtttl_tune) = id(tune_a_team);
           else if (tune_name == "Verve") id(rtttl_tune) = id(tune_verve);
+          else if (tune_name == "Nokia Ringtone") id(rtttl_tune) = id(tune_nokia_ringtone);
+          else if (tune_name == "Cantina") id(rtttl_tune) = id(tune_cantina);
+          else if (tune_name == "Mozart") id(rtttl_tune) = id(tune_mozart);
 
 globals:
   - id: shots_pulled
@@ -260,7 +263,17 @@ globals:
     type: std::string
     initial_value: '"verve:d=8,o=5,b=80:b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e,p,b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e"'
 
+  - id: tune_nokia_ringtone
+    type: std::string
+    initial_value: '"nokia_ringtone:24:d=4,o=5,b=180:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a"'
 
+  - id: tune_cantina
+    type: std::string
+    initial_value: '"cantina:d=8,o=5,b=250,b=250:a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,4a,a,g#,a,4g,f#,g,f#,4f.,d.,16p,4p.,a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,a,p,g,p,4g.,f#,g,p,c6,4a#,4a,4g"'
+
+  - id: tune_mozart
+    type: std::string
+    initial_value: '"mozart:d=16,o=5,b=125,b=125:16d#,c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#,d#,32c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#"'
 
 number:
   - platform: template # Home assistant widget to set target pressure 
@@ -294,16 +307,21 @@ select:
     restore_value: true
     optimistic: true
     options:
+      - "Random"
       - "Scale Up"
       - "Axel F"
       - "Polka"
       - "Star Trek"
       - "The A Team"
       - "Verve"
-      - "Random"
+      - "Nokia Ringtone"
+      - "Cantina"
+      - "Mozart"
     initial_option: "Scale Up"
     set_action:
       - script.execute:
           id: set_tune
           tune_name: !lambda 'return std::string(x);'
+      - rtttl.play:
+          rtttl: !lambda 'return id(rtttl_tune);'
     icon: mdi:music-note
