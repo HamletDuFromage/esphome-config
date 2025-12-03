@@ -38,8 +38,32 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  min_auth_mode: WPA2
+  
 
 captive_portal:
+
+# https://1j01.github.io/rtttl.
+substitutions:
+  tunes:
+    - name: "Scale Up"
+      rtttl: "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"
+    - name: "Axel F"
+      rtttl: "axel_f:d=8,o=5,b=125:16g,16g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g,4p,16f6,d6,c6,a#,4g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g"
+    - name: "Polka"
+      rtttl: "polka:d=16,o=5,b=140:d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,f,e,d,c#,d,a4,b4,c#,d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,d,4p,2c#,8d,8a4,8d"
+    - name: "Star Trek"
+      rtttl: "star_trek:d=16,o=5,b=63:8f.,a#,4d#6.,8d6,a#.,g.,c6.,4f6"
+    - name: "The A Team"
+      rtttl: "the_a_team:d=8,o=5,b=132:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#6.,16c6,16a#,g#.,2a#."
+    - name: "Verve"
+      rtttl: "verve:d=8,o=5,b=80:b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e,p,b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e"
+    - name: "Nokia Ringtone"
+      rtttl: "nokia_ringtone:d=4,o=5,b=180:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a"
+    - name: "Cantina"
+      rtttl: "cantina:d=8,o=5,b=250,b=250:a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,4a,a,g#,a,4g,f#,g,f#,4f.,d.,16p,4p.,a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,a,p,g,p,4g.,f#,g,p,c6,4a#,4a,4g"
+    - name: "Mozart"
+      rtttl: "mozart:d=16,o=5,b=125,b=125:16d#,c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#,d#,32c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#"
 
 output:
   - platform: gpio # initialize EN to LOW
@@ -205,25 +229,15 @@ script:
     then:
       - lambda: |-
           if (tune_name == "Random") {
-            std::vector<std::string> tune_names = {
-              "Scale Up",
-              "Axel F",
-              "Polka",
-              "Star Trek",
-              "The A Team",
-              "Verve"
-            };
-            tune_name = tune_names[rand() % tune_names.size()];
+            auto sz = id(tune_selector).size() - 1;
+            tune_name = id(tune_selector).at(rand() % sz + 1).value();
           }
-          if (tune_name == "Scale Up") id(rtttl_tune) = id(tune_scale_up);
-          else if (tune_name == "Axel F") id(rtttl_tune) = id(tune_axel_f);
-          else if (tune_name == "Polka") id(rtttl_tune) = id(tune_polka);
-          else if (tune_name == "Star Trek") id(rtttl_tune) = id(tune_star_trek);
-          else if (tune_name == "The A Team") id(rtttl_tune) = id(tune_a_team);
-          else if (tune_name == "Verve") id(rtttl_tune) = id(tune_verve);
-          else if (tune_name == "Nokia Ringtone") id(rtttl_tune) = id(tune_nokia_ringtone);
-          else if (tune_name == "Cantina") id(rtttl_tune) = id(tune_cantina);
-          else if (tune_name == "Mozart") id(rtttl_tune) = id(tune_mozart);
+          <% for tune in tunes %>
+          if (tune_name == "${tune.name}") {
+            id(rtttl_tune) = "${tune.rtttl}";
+          }
+          <% endfor %>
+
 
 globals:
   - id: shots_pulled
@@ -237,43 +251,6 @@ globals:
   - id: rtttl_tune
     type: std::string
     initial_value: '"scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"'
-
-  # https://1j01.github.io/rtttl.js
-  - id: tune_scale_up
-    type: std::string
-    initial_value: '"scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"'
-
-  - id: tune_axel_f
-    type: std::string
-    initial_value: '"axel_f:d=8,o=5,b=125:16g,16g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g,4p,16f6,d6,c6,a#,4g,a#.,16g,16p,16g,c6,g,f,4g,d6.,16g,16p,16g,d#6,d6,a#,g,d6,g6,16g,16f,16p,16f,d,a#,2g"'
-
-  - id: tune_polka
-    type: std::string
-    initial_value: '"polka:d=16,o=5,b=140:d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,f,e,d,c#,d,a4,b4,c#,d,c#,d,e,f,e,f,f#,g,f#,g,a,a#,a,g,a#,a,a4,c#,e,a,g,f,e,d,4p,2c#,8d,8a4,8d"'
-
-  - id: tune_star_trek
-    type: std::string
-    initial_value: '"star_trek:d=16,o=5,b=63:8f.,a#,4d#6.,8d6,a#.,g.,c6.,4f6"'
-
-  - id: tune_a_team
-    type: std::string
-    initial_value: '"the_a_team:d=8,o=5,b=132:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#6.,16c6,16a#,g#.,2a#."'
-
-  - id: tune_verve
-    type: std::string
-    initial_value: '"verve:d=8,o=5,b=80:b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e,p,b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e"'
-
-  - id: tune_nokia_ringtone
-    type: std::string
-    initial_value: '"nokia_ringtone:24:d=4,o=5,b=180:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a"'
-
-  - id: tune_cantina
-    type: std::string
-    initial_value: '"cantina:d=8,o=5,b=250,b=250:a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,4a,a,g#,a,4g,f#,g,f#,4f.,d.,16p,4p.,a,p,d6,p,a,p,d6,p,a,d6,p,a,p,g#,a,p,g,p,4g.,f#,g,p,c6,4a#,4a,4g"'
-
-  - id: tune_mozart
-    type: std::string
-    initial_value: '"mozart:d=16,o=5,b=125,b=125:16d#,c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#,d#,32c#,c,c#,8e,8p,f#,e,d#,e,8g#,8p,a,g#,g,g#,d#6,c#6,c6,c#6,d#6,c#6,c6,c#6,4e6,8c#6,8e6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8c#6,32b,32c#6,d#6,8c#6,8b,8a#,4g#"'
 
 number:
   - platform: template # Home assistant widget to set target pressure 
@@ -306,17 +283,14 @@ select:
     id: tune_selector
     restore_value: true
     optimistic: true
-    options:
-      - "Random"
-      - "Scale Up"
-      - "Axel F"
-      - "Polka"
-      - "Star Trek"
-      - "The A Team"
-      - "Verve"
-      - "Nokia Ringtone"
-      - "Cantina"
-      - "Mozart"
+    options: |
+      <% set ns = namespace(result=["Random"]) %>
+      <% for tune in tunes %>
+      <% set ns.result = ns.result + [
+          tune.name
+        ] %>
+      <% endfor %>
+      ${ns.result}
     initial_option: "Scale Up"
     set_action:
       - script.execute:
