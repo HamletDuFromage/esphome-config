@@ -60,6 +60,10 @@ substitutions:
       rtttl: "star_trek:d=16,o=5,b=63:8f.,a#,4d#6.,8d6,a#.,g.,c6.,4f6"
     - name: "The A Team"
       rtttl: "the_a_team:d=8,o=5,b=132:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#6.,16c6,16a#,g#.,2a#."
+    - name: "Mission Impossible"
+      rtttl: "mission_impossible:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d"
+    - name: "Super Mario Bros."
+      rtttl: "super_mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6"
     - name: "Verve"
       rtttl: "verve:d=8,o=5,b=80:b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e,p,b4,d,b4,c,a4,c,p,f,c,f,p,e,c,e"
     - name: "Nokia Ringtone"
@@ -191,6 +195,19 @@ sensor:
     update_interval: 30s
     icon: "mdi:timer-sand"
 
+  - platform: template
+    name: "Boiler Temperature (Estimated)"
+    unit_of_measurement: "°C"
+    lambda: |-
+      float p = id(pressure).state;  // bar gauge
+      return 100.0 + 28.9 * log(p + 1.18);
+    update_interval: 5s
+    icon: "mdi:thermometer-water"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+
 switch:
   - platform: gpio # Self-heating fix
     pin: 13 # D7
@@ -216,6 +233,7 @@ script:
       - while:
           condition:
             - lambda: 'return id(should_play_tune);'
+            - lambda: 'return !id(rtttl_tune).empty();' # "None" tune selected
           then:
             - wait_until:
                 - not:
@@ -233,9 +251,13 @@ script:
       tune_name: string
     then:
       - lambda: |-
+          if (tune_name == "None") {
+            id(rtttl_tune) = "";
+            return;
+          }
           if (tune_name == "Random") {
-            auto sz = id(tune_selector).size() - 1;
-            tune_name = id(tune_selector).at(rand() % sz + 1).value();
+            auto sz = id(tune_selector).size() - 2;
+            tune_name = id(tune_selector).at(rand() % sz + 2).value();
           }
           <% for tune in tunes %>
           <% if loop.first %>
@@ -291,7 +313,7 @@ select:
     restore_value: true
     optimistic: true
     options: |
-      <% set ns = namespace(result=["Random"]) %>
+      <% set ns = namespace(result=["None, Random"]) %>
       <% for tune in tunes %>
       <% set ns.result = ns.result + [
           tune.name
